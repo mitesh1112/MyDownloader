@@ -7,9 +7,8 @@ import os
 import requests
 import threading
 import sys
+import argparse
 
-DEFAULT_NOOFCHUNKS = 50
-#DEFAULT_NOOFCHUNKS = 1
 
 def get_url_info(url):
     resp = requests.get(url, stream=True)
@@ -28,8 +27,9 @@ def get_url_info(url):
 
     return (filename, filelen, supportchunks)
 
+
 def download_chunk(url, filename, targetdir, chunkno, start, end):
-    headers = {'Range' : 'bytes={0}-{1}'.format(start, end)}
+    headers = {'Range': 'bytes={0}-{1}'.format(start, end)}
     resp = requests.get(url, headers=headers, stream=True)
 
     chunksize = 10 * 1024
@@ -44,9 +44,11 @@ def download_chunk(url, filename, targetdir, chunkno, start, end):
     with open(tempfile, mode=mode) as chunkfile:
         for chunk in resp.iter_content(chunksize):
             chunkfile.write(chunk)
+            chunkfile.flush()
 
     chunkfile.close()
     resp.close()
+
 
 def merge_chunks(filename, targetdir, chunks):
     target_filepath = os.path.join(targetdir, filename)
@@ -58,11 +60,11 @@ def merge_chunks(filename, targetdir, chunks):
             os.remove(source_filepath)
 
 
-def download(url, targetdir = os.getcwd()):
+def download(url, targetdir, threads):
     (filename, filelen, supportchunks) = get_url_info(url)
 
     if supportchunks:
-        noofchunks = DEFAULT_NOOFCHUNKS
+        noofchunks = threads
     else:
         noofchunks = 1
 
@@ -71,7 +73,6 @@ def download(url, targetdir = os.getcwd()):
     chunksize = filelen // noofchunks
     lastchunksize = filelen % noofchunks
 
-    start = 0
     # Because start is end + 1.  For the first chunk start has to be 0
     end = -1
     chunk_threads = []
@@ -93,14 +94,15 @@ def download(url, targetdir = os.getcwd()):
                 print('Chunk file for the chunk {0} found.  No need to download the chunk again.'.format(chunkno))
                 continue
             else:
-                start = os.path.getsize(chunkfilepath)# - 1
+                start = os.path.getsize(chunkfilepath)  # - 1
 
-        th = threading.Thread(target=download_chunk, args=(url, filename, targetdir, chunkno, start, end), name='Thread_{0}_C{1}'.format(filename, chunkno))
+        th = threading.Thread(target=download_chunk, args=(url, filename, targetdir, chunkno, start, end),
+                              name='Thread_{0}_C{1}'.format(filename, chunkno))
         th.daemon = True
         th.start()
         chunk_threads.append(th)
 
-        #print('{0} to {1}'.format(start, end))
+        # print('{0} to {1}'.format(start, end))
 
     for th in chunk_threads:
         th.join()
@@ -111,14 +113,16 @@ def download(url, targetdir = os.getcwd()):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) == 1 or len(sys.argv) > 3:
-        print('Usage: MyDownloader.exe <url> [<targetdir>]')
-        sys.exit()
+    aparser = argparse.ArgumentParser(description='Download the file in multiple chunks, each chunk in a separate thread.')
+    aparser.add_argument('url', type=str, help='URL from where file is to be downloaded.')
+    aparser.add_argument('--path', '-p', type=str, help='Path where chunk files will be created and also where the actual file will be downloaded. Default is current directory.', default=os.getcwd())
+    aparser.add_argument('--threads', '-t', type=int, help='Number of chunks to create.', default=50)
 
-    if len(sys.argv) >= 2:
-        url = sys.argv[1]
-    else:
-        url = ''
+    args = aparser.parse_args()
+
+    url = args.url
+    targetdir = args.path
+    threads = args.threads
 
     if len(sys.argv) == 3:
         targetdir = sys.argv[2]
@@ -128,4 +132,4 @@ if __name__ == '__main__':
     if not targetdir.endswith('\\'):
         targetdir = targetdir + '\\'
 
-    download(url, targetdir)
+    download(url, targetdir, threads)
